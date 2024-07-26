@@ -33,6 +33,76 @@ library(ggpubr)
 library(patchwork)
 library(factoextra)
 library(ggrepel)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggspatial)
+```
+
+# Population locations
+
+```{r include=FALSE}
+canada <- ne_states(country = "canada", returnclass = "sf")
+usa <- ne_states(country = "united states of america", returnclass = "sf")
+
+pop_locations <- 
+  read_csv("Egg mass information Macrosystems 2018.csv")[c(-15, -16),] %>% 
+  select(-Notes)
+
+quarantine_us <- st_read("GM_Quarantine/GM_Quarantine_2018.shp")
+st_geometry_type(quarantine_us)
+st_crs(quarantine_us)
+```
+
+```{r message=FALSE, warning=FALSE, fig.cap="Map of spongy moth populations that egg masses were collected from. Dark grey shaded region represents the 2018 quarantined areas in the United States. Color scale of points represents the latitude of each population."}
+# spongy moth US quarantine map
+ggplot() +
+  geom_sf(
+    data = usa,
+    fill = '#cccccc'
+  ) +
+  geom_sf(
+    data = quarantine_us, 
+    fill = '#636363', 
+    color = '#cccccc'
+  ) + 
+  coord_sf(
+    xlim = c(-126,-66),
+    ylim = c(24.10, 50.10),
+    expand = FALSE
+  ) +
+  geom_point(
+    data = pop_locations,
+    aes(
+      x = Longitude, 
+      y = Latitude, color = Latitude),
+    size = 4
+    ) +
+  scale_color_gradient(low = "#de2d26", high = "#3182bd") +
+  geom_text_repel(
+    data = pop_locations,
+    aes(
+      x = Longitude, 
+      y = Latitude, 
+      label = Population
+      ),
+    size = 4,
+    fontface = "bold"
+    ) +
+  annotation_scale(
+    location = "bl", 
+    width_hint = 0.2
+  ) +
+  coord_sf(
+    xlim = c(-95.10, -65.10),
+    ylim = c(24.10, 50.10),
+    expand = FALSE
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+  )
 ```
 
 # Data sets
@@ -249,7 +319,7 @@ lmm_VO2 %>%
 
 Effect sizes for model show that despite the large influence of mass and temperature on metabolic rate an effect of population and its interaction with temperature.
 
-### Estimated marginal means 
+### Estimated marginal means
 
 Here we look at estimated marginal means for metabolic rate from the linear mixed effects model. Estimated marginal means standardize population metabolic rates by adjusting all populations to the same body mass (grand mean). Essentially, this is removing the effect of mass on metabolic rate.
 
@@ -330,7 +400,7 @@ emms_df %>%
 
 After correcting for differences in body size, there does appear to be a trend of increasing metabolic rate for more northern populations across temperatures.
 
-## Climate & metabolic rate 
+## Climate & metabolic rate
 
 Given the significant effect of population and the significant population-temperature interaction, the next step was to determine if variation in the metabolic rate-temperature relationship was related to climate variation.
 
