@@ -1,0 +1,600 @@
+---
+title: "Exploring climate-related variation in metabolic rate-temperature relationships
+  of wild spongy moth populations"
+author: "Sean D. Powers, PhD"
+output: 
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+---
+
+# Introduction
+
+This document describes the statistical analysis of the first chapter of my PhD dissertation. The focus of this study was to investigate the metabolic rate-temperature relationships across 14 wild populations of the invasive spongy moth (<i>Lymantria dispar dispar</i>), formerly known as the gypsy moth. This analysis was published in the Journal of Biogeography:
+
+Powers, S. D., Thompson, L. M., Parry, D., Grayson, K. L., Martinez, E., & Agosta, S. J. (2024). Climate-related variation of metabolic rate across the distribution of a broadly tolerant invasive forest pest. Journal of Biogeography, 51, 1117--1132. <https://doi.org/10.1111/jbi.14813>
+
+The research questions of this analysis were:
+
+1.  Does the metabolic rate-temperature relationship of spongy moth caterpillars vary among invasive populations?
+
+2.  Is this variation related to local climate?
+
+# R packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(easystats)
+library(emmeans)
+library(broom.mixed)
+library(ggpubr)
+library(patchwork)
+library(factoextra)
+library(ggrepel)
+```
+
+# Data sets
+
+Metabolic rate of spongy moth caterpillars was measured at one of three different temperatures (15ºC, 25ºC, or 30ºC). Metabolic rate was measured as oxygen consumption so the response variable in this analysis was the volume of oxygen consumed (VO2 µL/hr). We used a repeated measures design where oxygen consumption of each caterpillar once per hour over a period that lasted up to 20 hours.
+
+## Metabolic rate data
+
+The first data set used in the analysis contains the metabolic rate data.
+
+```{r}
+mrt_data <- read_csv("LD_wild populations_MRT_VO2_data.csv")
+
+mrt_data %>% head() 
+```
+
+## Climate & geography data
+
+The second data set in the analysis contains all of the climate summary data and geographical data for each population.
+
+```{r}
+clim_geo_data <- 
+  read_csv("Climate norms_geography_data.csv") %>% 
+  rename(
+    ELEV = ELEVATION_m,
+    PRECIP = PPT_mm,
+    Tmin = Tmin_C,
+    Tmean = Tmean_C,
+    Tmax = Tmax_C,
+    Trange = Trange_C
+  )
+
+clim_geo_data %>% head() 
+```
+
+# Data exploration
+
+## Wrangling data
+
+To explore the data I needed to reshape the data and the latitude data to the metabolic rate data.
+
+```{r warning=FALSE}
+lat_data <-  # Latitude data for each population
+  clim_geo_data %>% 
+  select(POPULATION, LATITUDE) %>% 
+  slice(1:14)
+
+mrt_long <- 
+  mrt_data %>% 
+  select(-FILENAME, -MARKER) %>%
+  pivot_longer(                     # reshaping metabolic data to long form
+    cols = VO2_uL_hr_1:VO2_uL_hr_3,
+    names_to = 'SAMPLE_HR',
+    names_prefix = 'VO2_uL_hr_',
+    values_to = 'VO2'
+  ) %>% 
+  rename(
+    ASSAY_TMP = ASSAY_TMP_C,
+    MASS = MASS_g
+  ) %>% 
+  left_join(lat_data, by = 'POPULATION') # joining the latitude data
+
+mrt_long %>% head() 
+```
+
+Description of column data:
+
+-   POPULATION: Population where egg masses were collected from.
+-   ASSAY_TMP: Temperature at which metabolic rate was measured.
+-   MASS: Body mass of 3<sup>rd</sup> instar caterpillars.
+-   SAMPLE_HR: The hour at which metabolic rate was measured. Metabolic rate for each caterpillar was measured repeatedly once per hour for three hours.
+-   VO2: Metabolic rate was measured as the volume of oxygen consumed per hour.
+-   LATITUDE: Latitude of each population.
+
+## Body size
+
+Metabolic rate increases with body size so it was an important covariate to include when analyzing metabolic rate data.
+
+```{r fig.cap="Box and violin plots of body mass for 3<sup>rd</sup> instar spongy moth caterpillars. The dashed line and shaded area represent the grand mean ± standard deviation." }
+mrt_long %>%
+  ggplot(aes(x = fct_reorder(POPULATION, desc(LATITUDE)), y = MASS)) +
+  annotate(
+    "rect",
+    xmin = -Inf,
+    xmax = Inf,
+    ymin = mean(mrt_data$MASS_g) - sd(mrt_data$MASS_g),
+    ymax = mean(mrt_data$MASS_g) + sd(mrt_data$MASS_g),
+    fill = "grey"
+  ) +
+  geom_violinhalf(position = position_nudge(x = 0.25)) +
+  geom_boxplot(width = 0.2) +
+  geom_hline(yintercept = mean(mrt_data$MASS_g), linetype = "dashed") +
+  scale_y_continuous(
+    breaks = seq(0.01, 0.12, 0.01)
+  ) +
+  labs(
+    x = 'Population',
+    y = 'Caterpillar mass (g)'
+  ) + 
+  theme_pubr() + 
+  theme(axis.text = element_text(size = 10))
+```
+
+These data show some variation, but overall body mass among these populations was relatively similar.
+
+## Metabolic rate
+
+Here were will look at a summary of the raw metabolic rate data.
+
+```{r fig.height=9, fig.width=7, fig.cap="Box and violin plots of the metabolic rate data for 3<sup>rd</sup> instar spongy moth caterpillars at each assay temperature."}
+
+tmp_labs <- c("15ºC", "25ºC", "30ºC")
+names(tmp_labs) <- c(15, 25, 30)
+
+mrt_long %>% 
+  drop_na() %>% 
+  ggplot(aes(x = POPULATION, y = VO2)) +
+  geom_violinhalf(position = position_nudge(x = 0.25)) +
+  geom_boxplot(width = 0.2) +
+  labs(
+    x = 'Population',
+    y = 'Metabolic rate (VO2 µL/hr)'
+  ) + 
+  facet_wrap(
+    ~ ASSAY_TMP,
+    ncol = 1, 
+    labeller = labeller(ASSAY_TMP = tmp_labs)
+    ) + 
+  theme_pubr()
+```
+
+The metabolic rate data are a bit skewed, but keep in mind that these are repeated measures so what we are seeing is an acclimation response. We will account for this in the model.
+
+```{r message=FALSE, fig.cap="Metabolic rate plotted as a function of body mass at each assay temperature. Points color represents the latitude of the individual that was measured."}
+mrt_long %>% 
+  drop_na() %>% 
+  ggplot(aes(x = MASS, y = VO2)) +
+  geom_point(aes(color = LATITUDE)) +
+  scale_color_gradient(low = '#de2d26', high = '#3182bd') +
+  geom_smooth(
+    method = 'lm',
+    color = 'black',
+    se = FALSE
+  ) +
+  labs(
+    x = "Caterpillar mass (g)",
+    y = "Metabolic rate (VO2 µL/hr)",
+    color = "Latitude"
+  ) +
+  facet_grid(
+    . ~ ASSAY_TMP,
+    labeller = labeller(ASSAY_TMP = tmp_labs)
+    ) +
+  theme_pubr() +
+  theme(legend.position = "right")
+```
+
+Here we can see how metabolic rate is impacted by body size and temperature. Metabolic rate increases with both size and temperature.
+
+# Statistical analysis
+
+## Linear mixed effects model
+
+These data were analyzed using a linear mixed effects model. We opted for this type of model because the data look pretty linear and it allows us to included the repeated metabolic rate measurements as a random factor. We were specifically interested in the population-temperature interaction, so this was only interaction included in our model. Mass was only included in the model because of its influence on metabolic rate so we were not interested in its interaction with other factors. Repeated measures (SAMPLE HR) were included as a random effect.
+
+```{r}
+lmm_VO2 <- 
+  lmer(
+    VO2 ~ MASS + POPULATION + ASSAY_TMP + POPULATION * ASSAY_TMP + (1|SAMPLE_HR),
+    data = mrt_long,
+    REML = TRUE
+  )
+```
+
+### Model assumptions
+
+```{r fig.cap="Plots looking model assumptions for linearity, homogeneity of variance, and normality of residuals."}
+check_model(
+  lmm_VO2, 
+  check = c("normality", "linearity", "homogeneity", "reqq"),
+  re_formula = NA
+  )
+```
+
+These plots show no red flags for violations of model assumptions for linearity, homogeneity of variance and normality of residuals.
+
+### Model results
+
+```{r message=FALSE, warning=FALSE}
+lmm_VO2 %>% 
+  anova() %>% 
+  model_parameters() %>% 
+  format_table() %>%
+  export_table(
+    digits = "signif",
+    align = "lrrrrr",
+    caption = "Table 4.1: ANOVA table for linear mixed effects model."
+  )
+```
+
+Results of the model show that all fixed effects and the interaction were significant.
+
+```{r}
+lmm_VO2 %>% 
+  anova() %>% 
+  effectsize() %>% 
+  format_table(use_symbols = TRUE) %>% 
+  export_table(
+    digits = "signif",
+    align = "lrrrr",
+    caption = "Table 4.2: Effect sizes for the model parameters."
+  )
+```
+
+Effect sizes for model show that despite the large influence of mass and temperature on metabolic rate an effect of population and its interaction with temperature.
+
+### Estimated marginal means 
+
+Here we look at estimated marginal means for metabolic rate from the linear mixed effects model. Estimated marginal means standardize population metabolic rates by adjusting all populations to the same body mass (grand mean). Essentially, this is removing the effect of mass on metabolic rate.
+
+```{r message=FALSE, warning=FALSE}
+lmm_VO2_rg <-  # creates a reference grid for calculating estimated marginal means
+  lmm_VO2 %>% 
+  ref_grid(at = list(ASSAY_TMP = c(15, 25, 30)))
+
+emms <-  
+  emmeans(lmm_VO2_rg, ~ POPULATION | ASSAY_TMP) %>% # est. marginal means by temperature
+  plot(comparisons = TRUE, plotit = FALSE) # data for plotting multiple comparisons
+
+emms_df <- # data frame with est. marginal means
+  tibble(
+    POPULATION = as.character(emms$POPULATION),
+    ASSAY_TMP = emms$ASSAY_TMP, 
+    VO2 = emms$the.emmean, # est. marginal means for metabolic rate
+    LCL = emms$lower.CL, # lower 95% confidence limit
+    UCL = emms$upper.CL, # upper 95% confidence limit
+    LCMP = emms$lcmpl, # value for multiple contrasts
+    UCMP = emms$rcmpl  # value for multiple contrasts
+    ) %>% 
+  mutate(
+    LCMP = coalesce(LCMP, VO2),
+    UCMP = coalesce(UCMP, VO2)
+    ) %>% 
+  left_join(lat_data, by = 'POPULATION') # joining latitude data for populations
+
+emms_df %>% head() 
+```
+
+```{r fig.height=7, fig.width=7, message=FALSE, warning=FALSE, fig.cap="Estimated marginal means for metabolic rate for each population by assay temperature. Populations are arranged from north to south (bottom to top). Bars represent 95% confidence limits and arrows represent statistical comparisons. Non-overlapping arrows represesnt significant differences between populations."}
+
+emms_df %>% 
+  ggplot(
+    aes(
+      x = VO2, 
+      y = fct_reorder(POPULATION, LATITUDE)
+      )
+    ) +
+  geom_errorbarh(
+    aes(
+      xmin = LCL,
+      xmax = UCL,
+      height = 0.75
+      )
+    ) +
+  geom_errorbarh(
+    aes(
+      xmin = LCMP,
+      xmax = UCMP,
+      height = 0,
+      linewidth = 6
+    ), 
+    show.legend = FALSE
+    ) +
+  geom_point(size = 4, aes(color = LATITUDE)) +
+  scale_color_gradient(low = "#de2d26", high = "#3182bd") +
+  facet_wrap(
+    ~ ASSAY_TMP,
+    ncol = 1,
+    labeller = labeller(ASSAY_TMP = tmp_labs),
+    strip.position = "right"
+    ) +
+  scale_x_continuous(breaks = seq(-10, 80, 10)) +
+  labs(
+    x = 'Metabolic rate est. marginal means (VO2 µL/hr)',
+    y = 'Population',
+    color = "Latitude"
+  ) +
+  theme_pubr() +
+  theme(
+    legend.position = "inside",
+    legend.position.inside = c(0.1, 0.15)
+    )
+
+```
+
+After correcting for differences in body size, there does appear to be a trend of increasing metabolic rate for more northern populations across temperatures.
+
+## Climate & metabolic rate 
+
+Given the significant effect of population and the significant population-temperature interaction, the next step was to determine if variation in the metabolic rate-temperature relationship was related to climate variation.
+
+### Principal component analysis
+
+To describe the local climate for each population, we used a principal component analysis. This PCA included 30-year climate normals (1981-2010) for each season (winter, spring, summer, and fall) for each population. These included:
+
+-   Minimum temperature
+-   Maximum temperature
+-   Mean temperature
+-   Temperature range
+-   Precipitation
+
+Geographic data were also included in the PCA:
+
+-   Latitude
+-   Longitude
+-   Elevation
+
+```{r fig.cap="Scree plot for PCA showing the variance explained by the principal components."}
+# reshaping data to wide format for PCA
+clim_geo_wide <- 
+  clim_geo_data %>%
+  filter(SEASON != "Annual") %>% 
+  mutate(SEASON = recode(SEASON,              
+                         `Fall` = "F", 
+                         `Spring` = "Sp", 
+                         `Summer` = "Su", 
+                         `Winter` = "W")) %>% 
+  pivot_wider(
+    names_from  = SEASON,
+    values_from = c(PRECIP, Tmin, Tmean, Tmax, Trange)
+    )
+
+clim_geo_wide %>% head()
+
+clim_geo_pca <- 
+  clim_geo_wide[,-1] %>% 
+  prcomp(center = TRUE, scale = TRUE)
+
+clim_geo_pca %>% 
+  fviz_screeplot(addlabels = TRUE) +
+  labs(
+    x = "Principal component",
+    y = "Explained variance (%)",
+    title = ""
+  ) +
+  theme_pubclean()
+```
+
+The scree plot shows that the PC 1 and PC2 explain 86.5% of the variance of the climate and geographic variables.
+
+```{r fig.cap="Biplot of PC coordinates and their explained variance. Each point represents a single population and are colored by latitude."}
+# plot of PC coordinates
+pc_coord <- 
+  clim_geo_pca %>% 
+  augment(clim_geo_wide) %>% 
+  ggplot(aes(x = .fittedPC1, y = .fittedPC2)) +
+  geom_point(size = 4, aes(color = LATITUDE)) +
+  scale_color_gradient(low = "#de2d26", high = "#3182bd") +
+  scale_x_continuous(breaks = seq(-5, 9, 1)) +
+  scale_y_continuous(breaks = seq(-4, 3, 1)) +
+  labs(
+    x = 'PC1 (66.4%)',
+    y = 'PC2 (20.1%)',
+    color = "Latitude"
+    ) +
+  theme_pubr() +
+  theme(
+    legend.position = 'inside',
+    legend.position.inside = c(0.9, 0.25)
+  )
+
+arrow_style <- 
+  arrow(
+    angle = 20,
+    ends = "first",
+    type = "open",
+    length = grid::unit(8, "pt")
+  )
+
+# plot of PC loadings
+pc_load <- 
+  clim_geo_pca %>% 
+  tidy(matrix = 'rotation') %>% 
+  pivot_wider(
+    names_from = 'PC',
+    names_prefix = 'PC',
+    values_from = 'value'
+  ) %>% 
+  select(column:PC2) %>% 
+  ggplot(aes(x = PC1, y = PC2, label = column)) +
+  geom_segment(
+    xend = 0,
+    yend = 0,
+    arrow = arrow_style,
+    alpha = 0.6
+  ) + 
+  geom_text_repel() +
+  scale_x_continuous(
+    limits = c(-0.3, 0.3),
+    breaks = seq(-0.5, 0.3, 0.1)
+  ) +
+  scale_y_continuous(
+    limits = c(-0.44, 0.2),
+    breaks = seq(-0.5, 0.3, 0.1)
+  ) +
+  theme_pubr()
+
+pc_coord 
+```
+
+```{r fig.cap="Biplot of PC loadings. Arrows represent the direction and magnitude of loadings for each climate and geographic variable used in the PCA. Arrows labels represent each variable. Climate variables are also labeled by season (W = winter, Sp = spring, Su = summer, F = fall)."}
+pc_load
+```
+
+PC biplots show that populations grouped by climate similarity and geographical location. The angle, magnitude, and direction of loadings illustrates a latitudinal gradient with cold and relatively dry climates at the northern range margin and warm and relatively wetter climates at the southern range margin.
+
+### PC regression analysis
+
+Now that we have the PCs for the climate and geography of each population the next step was to use linear regression to determine if metabolic rate variation among populations was related to climate variation. The first step was to run linear regressions for this relationship at each assay temperature. We will only focus on the first two PCs since these explain the most variation.
+
+```{r}
+# merging metabolic rate data with climate-geography PC data
+pc_reg_df <- 
+  emms_df %>% # metabolic rate est. marginal mean data
+  left_join(
+    bind_cols(clim_geo_wide[, 1],as_tibble(clim_geo_pca$x)), # climate-geography PC data
+    by = "POPULATION"
+  ) %>% 
+  select(POPULATION:PC2)
+
+pc_reg_df %>% head() 
+```
+
+#### PC1
+
+```{r message=FALSE, fig.cap="PC-metabolic rate regression at each assay temperature with PC1. Metabolic rates are est. marginal means to account for the effect of body mass on metabolic rate. Each point represents a single population, and the colour scale represents the latitude of each population."}
+pc_reg_df %>% 
+  ggplot(aes(x = PC1, y = VO2)) +
+  geom_smooth(method = lm, se = FALSE, color = 'black') +
+  geom_point(size = 3, aes(color = LATITUDE)) +
+  scale_color_gradient(low = '#de2d26', high = '#3182bd') +
+  scale_x_continuous(
+    breaks = seq(-5, 10, 5),
+    limits = c(-5, 10)
+  ) +
+  scale_y_continuous(breaks = seq(0, 70, 10)) +
+  facet_grid(
+    . ~ ASSAY_TMP,
+    labeller = labeller(ASSAY_TMP = tmp_labs)
+    ) +
+  labs(
+    x = 'PC1',
+    y = 'Metabolic rate (VO2 µL/hr)',
+    color = "Latitude"
+  ) +
+  theme_pubr() +
+  theme(
+    legend.position = 'inside',
+    legend.position.inside = c(0.95, 0.25)
+  )
+```
+
+```{r}
+pc_reg_df %>% 
+  select(ASSAY_TMP, VO2, PC1) %>% 
+  nest(DATA = VO2:PC1) %>% 
+  mutate(
+    MODEL = map(DATA, ~ lm(data = ., VO2 ~ PC1)),
+    STATISTICS = map(MODEL, glance)
+  ) %>% 
+  unnest(STATISTICS) %>% 
+  select(
+    ASSAY_TMP, 
+    r.squared,
+    adj.r.squared,
+    p.value,
+    AIC,
+    df.residual,
+    nobs) %>% 
+  rename(
+    `Assay temp. (ºC)` = ASSAY_TMP,
+    R2 = r.squared,
+    `Adj. R2` = adj.r.squared,
+    p = p.value,
+    `DF` = df.residual,
+    Observations = nobs
+  ) %>% 
+  format_table(use_symbols = TRUE) %>% 
+  export_table(
+    digits = "signif",
+    align = "lrrrrrr",
+    caption = "Table 4.3: Metabolic rate-PC1 regression statistics for each assay temperature."
+  )
+```
+
+#### PC2
+
+```{r message=FALSE, fig.cap="PC-metabolic rate regression at each assay temperature with PC2. Metabolic rates are est. marginal means to account for the effect of body mass on metabolic rate. Each point represents a single population, and the colour scale represents the latitude of each population."}
+pc_reg_df %>% 
+  ggplot(aes(x = PC2, y = VO2)) +
+  geom_smooth(method = lm, se = FALSE, color = 'black') +
+  geom_point(size = 3, aes(color = LATITUDE)) +
+  scale_color_gradient(low = '#de2d26', high = '#3182bd') +
+  scale_x_continuous(
+    breaks = seq(-5, 10, 5),
+    limits = c(-5, 10)
+  ) +
+  scale_y_continuous(breaks = seq(0, 70, 10)) +
+  facet_grid(
+    . ~ ASSAY_TMP,
+    labeller = labeller(ASSAY_TMP = tmp_labs)
+    ) +
+  labs(
+    x = 'PC2',
+    y = 'Metabolic rate (VO2 µL/hr)',
+    color = "Latitude"
+  ) +
+  theme_pubr() +
+  theme(
+    legend.position = 'inside',
+    legend.position.inside = c(0.95, 0.25)
+  )
+```
+
+```{r}
+pc_reg_df %>% 
+  select(ASSAY_TMP, VO2, PC2) %>% 
+  nest(DATA = VO2:PC2) %>% 
+  mutate(
+    MODEL = map(DATA, ~ lm(data = ., VO2 ~ PC2)),
+    STATISTICS = map(MODEL, glance)
+  ) %>% 
+  unnest(STATISTICS) %>% 
+  select(
+    ASSAY_TMP, 
+    r.squared,
+    adj.r.squared,
+    p.value,
+    AIC,
+    df.residual,
+    nobs) %>% 
+  rename(
+    `Assay temp. (ºC)` = ASSAY_TMP,
+    R2 = r.squared,
+    `Adj. R2` = adj.r.squared,
+    p = p.value,
+    `DF` = df.residual,
+    Observations = nobs
+  ) %>% 
+  format_table(use_symbols = TRUE) %>% 
+  export_table(
+    digits = "signif",
+    align = "lrrrrrr",
+    caption = "Table 4.4: Metabolic rate-PC2 regression statistics for each assay temperature."
+  )
+```
+
+The regression between metabolic rate and PCs indicate that variation among populations is driven by differences in latitude, temperature, and precipitation, but not differences in elevation or temperature range.
+
+# Conclusion
+
+The significant effects of population and the population-by-temperature interaction, and the significant relationship of metabolic rate with climate-geography PC1 provide strong evidence that:
+
+1.  Metabolic rate and its relationship with temperature differs among spongy moth populations.
+2.  Differents in metabolic rate among populations is related to differences in local climate.
