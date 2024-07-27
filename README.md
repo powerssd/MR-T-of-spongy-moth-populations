@@ -1,1 +1,2 @@
+# Metabolic rate variation among invasive spongy moth populations
 This R project contains scripts I used to analyze data from the first chapter of my PhD dissertation. In this script I analyze metabolic rate data of spongy moth larvae collected from 14 populations across the spongy moth invasive range in the United States. Thesse scripts highlight my ability to wrangle data, create data visualizations, reduce dimensionality of climate predictors, and model data using linear regression and linear mixed effects modeling. 
